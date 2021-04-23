@@ -8,6 +8,7 @@ A configuration file is required:
 
 `craigslist.area_id` can be found by searching: https://reference.craigslist.org/Areas
 `search_distance` is in KM
+`searches[].categories` can be found here: https://github.com/ecnepsnai/craigslist/blob/main/categories.md
 
 For example, the following looks for "vintage" and "retro" in the computers for sale category of Vancouver's craigslist
 
@@ -24,12 +25,12 @@ For example, the following looks for "vintage" and "retro" in the computers for 
     },
     "searches": [
         {
-            "category": "sya",
+            "categories": [ "sya" ],
             "query": "retro",
             "name": "Retro Computers"
         },
         {
-            "category": "sya",
+            "categories": [ "sya" ],
             "query": "vintage",
             "name": "Vintage Computers",
             "ignore": [

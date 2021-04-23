@@ -9,6 +9,7 @@ type clnotifyConfigType struct {
 	Craigslist clnotifyConfigCraigslistType `json:"craigslist"`
 	Discord    clnotifyConfigDiscordType    `json:"discord"`
 	Searches   []clnotifyConfigSearchType   `json:"searches"`
+	Verbose    bool                         `json:"verbose"`
 }
 
 type clnotifyConfigCraigslistType struct {
@@ -23,10 +24,10 @@ type clnotifyConfigDiscordType struct {
 }
 
 type clnotifyConfigSearchType struct {
-	Category string   `json:"category"`
-	Query    string   `json:"query"`
-	Name     string   `json:"name"`
-	Ignore   []string `json:"ignore"`
+	Categories []string `json:"categories"`
+	Query      string   `json:"query"`
+	Name       string   `json:"name"`
+	Ignore     []string `json:"ignore"`
 }
 
 func loadConfig(filePath string) (*clnotifyConfigType, error) {

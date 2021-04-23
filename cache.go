@@ -14,7 +14,7 @@ type cacheType struct {
 var cache cacheType
 
 func loadCache() {
-	d, err := store.New(".", "clnotifycache")
+	d, err := store.New(".", "clnotifycache", nil)
 	if err != nil {
 		panic(err)
 	}

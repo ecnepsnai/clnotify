@@ -8,7 +8,10 @@ import (
 
 	"github.com/ecnepsnai/craigslist"
 	"github.com/ecnepsnai/discord"
+	"github.com/ecnepsnai/logtic"
 )
+
+var log = logtic.Connect("clnotify")
 
 func main() {
 	if len(os.Args) < 2 {
@@ -22,6 +25,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	logtic.Log.FilePath = "clnotify.log"
+	logtic.Log.Level = logtic.LevelError
+	if config.Verbose {
+		logtic.Log.Level = logtic.LevelDebug
+	}
+	logtic.Open()
+	defer logtic.Close()
+
 	discord.WebhookURL = config.Discord.WebhookURL
 	loadCache()
 
@@ -32,28 +43,37 @@ func main() {
 		SearchDistance: config.Craigslist.SearchDistance,
 	}
 	for _, search := range config.Searches {
-		firstForSearch := cache.IsFirstForSearch(search.Category + search.Query)
-		cache.SetFirstForSearch(search.Category + search.Query)
-
-		results, err := craigslist.Search(search.Category, search.Query, params)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting results: query='%s' category='%s'\n", search.Query, search.Category)
-			continue
-		}
-
-		for _, result := range results {
-			if resultIsIgnored(result.Title, search.Ignore) {
-				continue
-			}
-
+		for _, category := range search.Categories {
+			log.Debug("Running search: category='%s' query='%s'", category, search.Query)
+			firstForSearch := cache.IsFirstForSearch(category + search.Query)
 			if firstForSearch {
-				cache.AddPost(result)
+				log.Debug("First instance of search: %s", search.Name)
+			}
+			cache.SetFirstForSearch(category + search.Query)
+
+			results, err := craigslist.Search(category, search.Query, params)
+			if err != nil {
+				log.Error("Error getting results: query='%s' category='%s' error='%s'", search.Query, category, err.Error())
 				continue
 			}
+			log.Debug("Search returned: query='%s' category='%s' result_count=%d", search.Query, category, len(results))
 
-			if !cache.HaveSeenPost(result) {
-				discordPost(result, search.Name)
-				cache.AddPost(result)
+			for _, result := range results {
+				if resultIsIgnored(result.Title, search.Ignore) {
+					log.Debug("Listing is ignored: title='%s'", result.Title)
+					continue
+				}
+
+				if firstForSearch {
+					cache.AddPost(result)
+					continue
+				}
+
+				if !cache.HaveSeenPost(result) {
+					log.Debug("New post found: query='%s' category='%s' title='%s'", search.Query, category, result.Title)
+					discordPost(result, search.Name)
+					cache.AddPost(result)
+				}
 			}
 		}
 	}
@@ -102,5 +122,6 @@ func discordPost(result craigslist.Result, searchName string) {
 		message.Embeds[0].Image = &image
 	}
 
+	log.Info("New post for %s: $%d %s", searchName, result.Price, result.Title)
 	discord.Post(message)
 }
