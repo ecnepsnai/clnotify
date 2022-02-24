@@ -3,15 +3,17 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
 	"github.com/ecnepsnai/craigslist"
 	"github.com/ecnepsnai/discord"
 	"github.com/ecnepsnai/logtic"
+	"github.com/google/uuid"
 )
 
-var log = logtic.Connect("clnotify")
+var log = logtic.Log.Connect("clnotify")
 
 func main() {
 	if len(os.Args) < 2 {
@@ -30,11 +32,12 @@ func main() {
 	if config.Verbose {
 		logtic.Log.Level = logtic.LevelDebug
 	}
-	logtic.Open()
-	defer logtic.Close()
+	logtic.Log.Open()
+	defer logtic.Log.Close()
 
 	discord.WebhookURL = config.Discord.WebhookURL
 	loadCache()
+	defer cache.store.Close()
 
 	params := craigslist.LocationParams{
 		AreaID:         config.Craigslist.AreaID,
@@ -44,7 +47,10 @@ func main() {
 	}
 	for _, search := range config.Searches {
 		for _, category := range search.Categories {
-			log.Debug("Running search: category='%s' query='%s'", category, search.Query)
+			log.PDebug("Running search", map[string]interface{}{
+				"category": category,
+				"query":    search.Query,
+			})
 			firstForSearch := cache.IsFirstForSearch(category + search.Query)
 			if firstForSearch {
 				log.Debug("First instance of search: %s", search.Name)
@@ -53,14 +59,24 @@ func main() {
 
 			results, err := craigslist.Search(category, search.Query, params)
 			if err != nil {
-				log.Error("Error getting results: query='%s' category='%s' error='%s'", search.Query, category, err.Error())
+				log.PError("Error getting results", map[string]interface{}{
+					"query":    search.Query,
+					"category": category,
+					"error":    err.Error(),
+				})
 				continue
 			}
-			log.Debug("Search returned: query='%s' category='%s' result_count=%d", search.Query, category, len(results))
+			log.PDebug("Search returned results", map[string]interface{}{
+				"query":        search.Query,
+				"category":     category,
+				"result_count": len(results),
+			})
 
 			for _, result := range results {
 				if resultIsIgnored(result.Title, search.Ignore) {
-					log.Debug("Listing is ignored: title='%s'", result.Title)
+					log.PDebug("Listing is ignored", map[string]interface{}{
+						"title": result.Title,
+					})
 					continue
 				}
 
@@ -70,15 +86,17 @@ func main() {
 				}
 
 				if !cache.HaveSeenPost(result) {
-					log.Debug("New post found: query='%s' category='%s' title='%s'", search.Query, category, result.Title)
+					log.PDebug("New post found", map[string]interface{}{
+						"query":    search.Query,
+						"category": category,
+						"title":    result.Title,
+					})
 					discordPost(result, search.Name)
 					cache.AddPost(result)
 				}
 			}
 		}
 	}
-
-	cache.store.Close()
 }
 
 func resultIsIgnored(resultTitle string, ignoredWords []string) bool {
@@ -95,33 +113,47 @@ func resultIsIgnored(resultTitle string, ignoredWords []string) bool {
 func discordPost(result craigslist.Result, searchName string) {
 	post, err := result.Posting()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting post details: posting_id=%d error='%s'", result.PostingID, err.Error())
+		log.PError("Error getting post details", map[string]interface{}{
+			"posting_id": result.PostingID,
+			"error":      err.Error(),
+		})
 		return
 	}
 
-	message := discord.PostOptions{
-		Content: "New Post for _" + searchName + "_",
-		Embeds: []discord.Embed{
-			{
-				Title: result.Title,
-				URL:   post.URL,
-				Fields: []discord.Field{
-					{
-						Name:  "Price",
-						Value: fmt.Sprintf("$%d", result.Price),
-					},
-				},
-			},
-		},
-	}
-	if len(result.Images) > 0 {
-		url := result.ImageURLs()[0]
-		image := discord.Image{
-			URL: url,
-		}
-		message.Embeds[0].Image = &image
+	content := discord.PostOptions{
+		Content: fmt.Sprintf("New listing for \"%s\": ($%d) **%s**: %s", searchName, result.Price, result.Title, post.URL),
 	}
 
-	log.Info("New post for %s: $%d %s", searchName, result.Price, result.Title)
-	discord.Post(message)
+	if len(result.Images) > 0 {
+		req, err := http.NewRequest("GET", result.ImageURLs()[0], nil)
+		if err != nil {
+			log.PError("Error forming HTTP request", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+		req.Header.Add("Pragma", "no-cache")
+		req.Header.Add("Cache-Control", "no-cache")
+		req.Header.Add("Upgrade-Insecure-Requests", "1")
+		req.Header.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36 Edg/98.0.1108.56")
+		req.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
+		req.Header.Add("Accept-Encoding", "gzip, deflate, br")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.PError("Error getting post image", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		discord.UploadFile(content, discord.FileOptions{
+			FileName: uuid.NewString() + ".jpg",
+			Reader:   resp.Body,
+		})
+		resp.Body.Close()
+	} else {
+		discord.Post(content)
+	}
+
+	log.Info("%s", content.Content)
 }
