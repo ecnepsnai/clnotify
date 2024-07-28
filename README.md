@@ -1,3 +1,9 @@
+> [!CAUTION]
+> This project and package are no longer maintained and likely do not work.
+
+<details>
+  <summary>Original readme</summary>
+
 # clnotify
 
 clnotify is a golang application to notify on Craigslist posts matching specific terms to a Discord webhook.
@@ -40,3 +46,5 @@ For example, the following looks for "vintage" and "retro" in the computers for 
     ]
 }
 ```
+
+</details>
